@@ -1,0 +1,287 @@
+<div class="container my-4">
+  <h1 class="text-primary mb-1">🔒 VulnScan CL</h1>
+  <p class="text-muted">Analiza la configuración de seguridad HTTP de cualquier sitio público.</p>
+
+  <!-- Input -->
+  <div class="input-group mb-3">
+    <input
+      type="url"
+      class="form-control"
+      placeholder="https://www.ejemplo.cl"
+      [(ngModel)]="targetUrl"
+      (keyup.enter)="scan()"
+    />
+    <button class="btn btn-dark" (click)="scan()" [disabled]="loading">Analizar</button>
+  </div>
+
+  <!-- Loading -->
+  <div *ngIf="loading" class="alert alert-secondary py-2">
+    Analizando... 🔍
+  </div>
+
+  <!-- Resultado -->
+  <div *ngIf="result as r" class="mt-3">
+    <!-- Error -->
+    <div *ngIf="r?.error" class="alert alert-danger">
+      ❌ {{ r.error }}
+    </div>
+
+    <!-- Resultado principal -->
+    <div *ngIf="!r?.error" class="card shadow-sm">
+      <div class="card-body">
+        <!-- Encabezado en grid -->
+        <div class="row g-3 align-items-start">
+          <!-- Info básica -->
+          <div class="col-12 col-md-8">
+            <div>
+              <strong>🌐 URL:</strong>
+              <a [href]="r?.url || '#'" target="_blank" rel="noopener noreferrer">{{ r?.url || 'N/D' }}</a>
+            </div>
+            <div><strong>🖥 Servidor:</strong> {{ r?.server || 'No detectado' }}</div>
+            <div><strong>📶 Estado HTTP:</strong> {{ (r?.status !== null && r?.status !== undefined) ? r.status : 'N/D' }}</div>
+
+            <div>
+              <strong>🔗 HTTPS:</strong>
+              <span [ngClass]="(r?.isHttps ? 'text-success' : 'text-danger')">
+                {{ r?.isHttps ? 'Sí' : 'No' }}
+              </span>
+            </div>
+
+            <div>
+              <strong>🧷 HSTS:</strong>
+              <span [ngClass]="(r?.hsts ? 'text-success' : 'text-danger')">
+                {{ r?.hsts ? 'Sí' : 'No' }}
+              </span>
+              <span *ngIf="r?.hstsPreload" class="badge bg-success ms-1">preload</span>
+            </div>
+
+            <div>
+              <strong>🛡 CSP:</strong>
+              <ng-container *ngIf="r?.cspAnalysis?.present; else cspAbsent">
+                <span [ngClass]="(r?.cspAnalysis?.strong ? 'text-success' : 'text-danger')">
+                  {{ r?.cspAnalysis?.strong ? 'Fuerte' : 'Débil' }}
+                </span>
+              </ng-container>
+              <ng-template #cspAbsent>
+                <span class="text-danger">Ausente</span>
+              </ng-template>
+            </div>
+
+            <!-- CORS -->
+            <div>
+              <strong>🌐 CORS:</strong>
+              <ng-container *ngIf="r?.cors as c; else noCors">
+                origen={{ c?.origin || 'N/D' }} |
+                métodos={{ formatMethods(c?.methods) }} |
+                riesgoso=
+                <span [ngClass]="(c?.risky ? 'text-danger' : 'text-success')">
+                  {{ c?.risky ? 'Sí' : 'No' }}
+                </span>
+              </ng-container>
+              <ng-template #noCors>
+                origen=N/D | métodos=N/D | riesgoso=<span class="text-muted">N/D</span>
+              </ng-template>
+            </div>
+
+            <div *ngIf="r?.redirectsToHttps !== undefined">
+              <strong>↪️ Redirección HTTP→HTTPS:</strong>
+              <span [ngClass]="(r?.redirectsToHttps ? 'text-success' : 'text-danger')">
+                {{ r?.redirectsToHttps ? 'Sí' : 'No' }}
+              </span>
+            </div>
+          </div>
+
+          <!-- Score visual -->
+          <div class="col-12 col-md-4 text-md-end">
+            <div class="fw-bold fs-5 mb-1">
+              VulnScore: {{ (score ?? 0) }}% ({{ scoreLabel || 'Riesgoso' }})
+            </div>
+
+            <div class="progress mb-2" role="progressbar" aria-valuemin="0" aria-valuemax="100" [attr.aria-valuenow]="score ?? 0">
+              <div class="progress-bar" [ngClass]="scoreBarClass || ''" [style.width.%]="score ?? 0"></div>
+            </div>
+
+            <div class="small mt-1">
+              <span *ngIf="(score ?? 0) >= 90" class="badge bg-success">Excelente</span>
+              <span *ngIf="(score ?? 0) >= 80 && (score ?? 0) < 90" class="badge bg-success">Seguro</span>
+              <span *ngIf="(score ?? 0) >= 60 && (score ?? 0) < 80" class="badge bg-warning text-dark">Mejorable</span>
+              <span *ngIf="(score ?? 0) >= 40 && (score ?? 0) < 60" class="badge bg-orange text-dark">Bajo</span>
+              <span *ngIf="(score ?? 0) < 40" class="badge bg-danger">Riesgoso</span>
+            </div>
+          </div>
+        </div>
+
+        <hr class="my-3" />
+
+        <!-- Recomendaciones + Análisis (sin cards anidadas) -->
+        <div class="row g-3">
+          <!-- Cabeceras faltantes + CSP + HTML findings -->
+          <div class="col-12 col-md-6">
+            <div class="panel h-100">
+              <h5 class="mb-3">⚠️ Cabeceras faltantes</h5>
+
+              <ng-container *ngIf="(r?.missingHeaders?.length || 0) > 0; else noMissing">
+                <ul class="mb-2">
+                  <li *ngFor="let h of r?.missingHeaders">
+                    <code>{{ h }}</code>
+                    <div class="small text-muted">{{ recommendationFor ? recommendationFor(h) : '' }}</div>
+                  </li>
+                </ul>
+              </ng-container>
+              <ng-template #noMissing>
+                <p class="mb-0 text-success">Ninguna 🚀 (Configuración completa)</p>
+              </ng-template>
+
+              <!-- CSP: razones de debilidad -->
+              <div class="panel mt-3" *ngIf="r?.cspAnalysis?.present">
+                <h5 class="mb-2">🛡 Análisis CSP</h5>
+                <ng-container *ngIf="r?.cspAnalysis?.strong; else weakCsp">
+                  <p class="mb-0 text-success">CSP fuerte ✅</p>
+                </ng-container>
+                <ng-template #weakCsp>
+                  <p class="mb-1 text-danger">CSP débil — razones detectadas:</p>
+                  <ul class="mb-0">
+                    <li *ngFor="let w of (r?.cspAnalysis?.weakReasons || [])">{{ w }}</li>
+                  </ul>
+                </ng-template>
+              </div>
+
+              <!-- Hallazgos HTML (pasivo) -->
+              <div class="panel mt-3" *ngIf="r?.htmlFindings">
+                <h5 class="mb-2">🧩 Hallazgos del HTML</h5>
+                <div class="small">
+                  <div>Scripts inline: <strong>{{ r?.htmlFindings?.inlineScripts ?? 0 }}</strong></div>
+                  <div>Estilos inline: <strong>{{ r?.htmlFindings?.inlineStyles ?? 0 }}</strong></div>
+
+                  <div class="mt-1">
+                    Dominios de <code>script</code> externos:
+                    <span *ngIf="(r?.htmlFindings?.externalScriptHosts?.length || 0) === 0" class="text-muted">Ninguno</span>
+                    <ul *ngIf="(r?.htmlFindings?.externalScriptHosts?.length || 0) > 0">
+                      <li *ngFor="let d of (r?.htmlFindings?.externalScriptHosts || [])">{{ d }}</li>
+                    </ul>
+                  </div>
+
+                  <div>
+                    Dominios de <code>style</code> externos:
+                    <span *ngIf="(r?.htmlFindings?.externalStyleHosts?.length || 0) === 0" class="text-muted">Ninguno</span>
+                    <ul *ngIf="(r?.htmlFindings?.externalStyleHosts?.length || 0) > 0">
+                      <li *ngFor="let d of (r?.htmlFindings?.externalStyleHosts || [])">{{ d }}</li>
+                    </ul>
+                  </div>
+
+                  <div class="mt-1">
+                    Mixed content encontrado:
+                    <strong [ngClass]="((r?.htmlFindings?.mixedContentCount||0)>0 ? 'text-danger':'text-success')">
+                      {{ r?.htmlFindings?.mixedContentCount || 0 }}
+                    </strong>
+                  </div>
+
+                  <div class="mt-2 text-muted">
+                    Sugerencia: usa <code>nonce</code>/<code>hash</code> para inline, y whitelistea los dominios en
+                    <code>script-src</code>/<code>style-src</code>.
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Detalles técnicos -->
+          <div class="col-12 col-md-6">
+            <div class="panel h-100">
+              <h5 class="mb-3">🔎 Detalles técnicos</h5>
+              <button class="btn btn-sm btn-outline-secondary mb-2" (click)="detailsOpen = !detailsOpen">
+                {{ detailsOpen ? 'Ocultar' : 'Ver' }} headers completos
+              </button>
+
+              <div *ngIf="detailsOpen" class="small">
+                <ng-container *ngIf="r?.allHeaders as headers">
+                  <div *ngFor="let h of headers | keyvalue">
+                    <code>{{ h.key }}:</code>
+                    <span>{{ h.value }}</span>
+                  </div>
+                </ng-container>
+                <ng-container *ngIf="!r?.allHeaders">
+                  <em>Sin headers para mostrar.</em>
+                </ng-container>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Nota -->
+        <div class="note-footer mt-3 small text-muted">
+          * Análisis pasivo y educativo — sin pruebas intrusivas.<br />
+          <span class="text-secondary">Versión {{ (score ?? 0) >= 90 ? 'Profesional' : 'Educativa' }}</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Historial / Comparativo ===== -->
+  <div class="row mt-4">
+    <div class="col-12">
+      <div class="card border-0 shadow-sm">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <h5 class="mb-0">📚 Historial de análisis</h5>
+            <div class="d-flex gap-2">
+              <button class="btn btn-sm btn-outline-primary" (click)="downloadJson()" [disabled]="!result">Descargar JSON actual</button>
+              <button class="btn btn-sm btn-outline-success" (click)="openHtmlReport()" [disabled]="!result">Ver informe HTML</button>
+              <button class="btn btn-sm btn-outline-danger" (click)="clearHistory()" [disabled]="(history?.length || 0)===0">Limpiar historial</button>
+            </div>
+          </div>
+
+          <div *ngIf="(history?.length || 0) === 0" class="text-muted small">
+            Sin elementos aún. Analiza un sitio para comenzar.
+          </div>
+
+          <div *ngIf="(history?.length || 0) > 0" class="table-responsive mt-2">
+            <table class="table table-sm align-middle mb-0">
+              <thead>
+                <tr>
+                  <th class="nowrap">Fecha</th>
+                  <th>URL</th>
+                  <th class="nowrap">Score</th>
+                  <th class="nowrap">HTTPS</th>
+                  <th class="nowrap">HSTS</th>
+                  <th class="nowrap">CSP</th>
+                  <th class="nowrap">Faltantes</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr *ngFor="let item of history">
+                  <td class="small nowrap">{{ item?.addedAt | date:'short' }}</td>
+                  <td class="small">
+                    <div class="truncate-url">
+                      <a [href]="item?.url || '#'" target="_blank" rel="noopener">{{ item?.url || 'N/D' }}</a>
+                    </div>
+                  </td>
+                  <td class="nowrap">
+                    <span class="badge"
+                      [ngClass]="{
+                        'bg-success': (item?.score||0) >= 80,
+                        'bg-warning text-dark': (item?.score||0) >= 60 && (item?.score||0) < 80,
+                        'bg-orange text-dark': (item?.score||0) >= 40 && (item?.score||0) < 60,
+                        'bg-danger': (item?.score||0) < 40
+                      }">{{ item?.score ?? 0 }}%</span>
+                  </td>
+                  <td class="nowrap"><span [ngClass]="(item?.isHttps ? 'text-success' : 'text-danger')">{{ item?.isHttps ? 'Sí' : 'No' }}</span></td>
+                  <td class="nowrap"><span [ngClass]="(item?.hsts ? 'text-success' : 'text-danger')">{{ item?.hsts ? 'Sí' : 'No' }}</span></td>
+                  <td class="nowrap">
+                    <ng-container *ngIf="item?.cspWeak !== undefined; else cspUnknown">
+                      <span [ngClass]="(item?.cspWeak ? 'text-danger' : 'text-success')">
+                        {{ item?.cspWeak ? 'Débil' : 'Fuerte' }}
+                      </span>
+                    </ng-container>
+                    <ng-template #cspUnknown><span class="text-muted">N/D</span></ng-template>
+                  </td>
+                  <td class="small nowrap">{{ (item?.missingHeaders?.length || 0) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div><!-- /card-body historial -->
+      </div><!-- /card historial -->
+    </div><!-- /col -->
+  </div><!-- /row -->
+</div>

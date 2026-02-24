@@ -1,0 +1,19 @@
+/* ❌ Evitar que el thead se quede pegado creando una franja rara */
+.table thead th { position: static !important; top: auto !important; }
+
+/* ❌ No fuerces nowrap en toda la tabla (las URLs largas empujan el layout) */
+.table td, .table th { white-space: normal !important; }
+
+/* ✅ Solo en columnas pequeñas usa nowrap (si quieres) */
+.nowrap { white-space: nowrap; }
+
+/* ✅ Truncar URLs largas con … */
+.truncate-url {
+  max-width: 380px;      /* ajusta el ancho si quieres */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* (Opcional) un poco de aire al final para que nada “se pegue” al borde */
+.container { padding-bottom: 24px; }
